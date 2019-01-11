@@ -92,6 +92,7 @@ type Msg
     | ProvisionChannel
     | ProvisionedChannel (Result Http.Error Int)
     | RetrieveChannel
+    | RetrievedChannel (Result Http.Error (List Channel.Channel))
     | RemoveChannel
 
 
@@ -135,13 +136,11 @@ update msg model =
 
         GetUser ->
             ( model
-            , Http.request
-                (User.request
-                    model.email
-                    model.password
-                    "http://localhost/users"
-                    (User.expectUser GotUser)
-                )
+            , User.request
+                model.email
+                model.password
+                "http://localhost/users"
+                (User.expectUser GotUser)
             )
 
         GotUser result ->
@@ -154,13 +153,11 @@ update msg model =
 
         GetToken ->
             ( model
-            , Http.request
-                (User.request
-                    model.email
-                    model.password
-                    "http://localhost/tokens"
-                    (User.expectToken GotToken)
-                )
+            , User.request
+                model.email
+                model.password
+                "http://localhost/tokens"
+                (User.expectToken GotToken)
             )
 
         GotToken result ->
@@ -179,13 +176,11 @@ update msg model =
 
         ProvisionChannel ->
             ( model
-            , Http.request
-                (Channel.request
-                    "http://localhost/channels"
-                    model.token
-                    model.channel
-                    (Channel.expectChannel ProvisionedChannel)
-                )
+            , Channel.requestProvision
+                "http://localhost/channels"
+                model.token
+                model.channel
+                (Channel.expectProvision ProvisionedChannel)
             )
 
         ProvisionedChannel result ->
@@ -197,11 +192,29 @@ update msg model =
                     handleError error model
 
         RetrieveChannel ->
-            ( model, Cmd.none )
+            ( model
+            , Channel.requestRetrieve
+                "http://localhost/channels"
+                model.token
+                (Channel.expectRetrieve RetrievedChannel)
+            )
 
+        RetrievedChannel result ->
+            case result of
+                Ok channels ->
+                    ( { model | response = channelsToString channels }, Cmd.none )
+
+                Err error ->
+                    handleError error model
+            
         RemoveChannel ->
-            ( model, Cmd.none )
-
+            ( model
+            , Channel.requestRemove
+                "http://localhost/channels"
+                model.channel                     
+                model.token
+                (Channel.expectProvision ProvisionedChannel)                     
+            )            
 
 
 -- SUBSCRIPTIONS
@@ -270,7 +283,7 @@ view model =
                                         ]
                                     , Form.group []
                                         [ Form.label [ for "mytoken" ] [ text "Token" ]
-                                        , Input.password [ Input.id "mytoken", Input.onInput SubmitToken ]
+                                        , Input.text [ Input.id "mytoken", Input.onInput SubmitToken ]
 
                                         -- , Form.help [] [ text model.token ]
                                         ]
@@ -341,5 +354,13 @@ handleError error model =
         Http.BadStatus num ->
             ( { model | response = "Bad status " ++ String.fromInt num }, Cmd.none )
 
-        Http.BadBody txt ->
-            ( { model | response = "Bad body" ++ txt }, Cmd.none )
+        Http.BadBody err ->
+            ( { model | response = err }, Cmd.none )
+
+                
+channelsToString : List Channel.Channel -> String
+channelsToString channels =
+    List.map
+        (\channel -> channel.name ++ " " ++ channel.id ++ " || ")
+        channels
+        |> String.concat
