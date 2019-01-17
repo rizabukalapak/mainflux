@@ -1,4 +1,4 @@
-module Channel exposing (..)
+module Thing exposing (..)
 
 import Http
 import Html exposing  (..)
@@ -17,12 +17,13 @@ import Error
 
 urls =
     {
-        channels = "http://localhost/channels"
+        things = "http://localhost/things"
     }
    
 
 type alias Model =
-    { channel : String
+    { name : String
+    , type_ : String
     , token : String
     , response : String
     }
@@ -30,69 +31,78 @@ type alias Model =
 
 initial : Model
 initial =
-    { channel = ""
+    { name = ""
+    , type_ = ""
     , token = ""
     , response = ""
     }
 
 
 type Msg
-    = SubmitChannel String
-    | SubmitToken String
-    | ProvisionChannel
-    | ProvisionedChannel (Result Http.Error Int)
-    | RetrieveChannel
-    | RetrievedChannel (Result Http.Error (List Channel))
-    | RemoveChannel
+    = SubmitToken String
+    | SubmitType String
+    | SubmitName String
+    | ProvisionThing
+    | ProvisionedThing (Result Http.Error Int)      
+    | RetrieveThing
+    | RetrievedThing (Result Http.Error (List Thing))
+    | RemoveThing
+
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        SubmitChannel channel ->
-            ( { model | channel = channel }, Cmd.none )
-
         SubmitToken token ->
             ( { model | token = token }, Cmd.none )
+                    
+        SubmitType type_ ->
+            ( { model | type_ = type_ }, Cmd.none )
 
-        ProvisionChannel ->
+        SubmitName name ->
+            ( { model | name = name }, Cmd.none )
+
+        ProvisionThing ->
             ( model
             , provision
-                urls.channels
+                urls.things
                 model.token
-                model.channel
+                model.type_
+                model.name
             )
 
-        ProvisionedChannel result ->
+        ProvisionedThing result ->
             case result of
                 Ok statusCode ->
                     ( { model | response = "Ok " ++ String.fromInt statusCode }, Cmd.none )
 
                 Err error ->
                     ( { model | response = (Error.handle error) }, Cmd.none )
-
-        RetrieveChannel ->
+            
+        RetrieveThing ->
             ( model
             , retrieve
-                urls.channels
+                urls.things
                 model.token
             )
+            
 
-        RetrievedChannel result ->
+        RetrievedThing result ->
             case result of
-                Ok channels ->
-                    ( { model | response = channelsToString channels }, Cmd.none )
-
+                Ok things ->
+                    ( { model | response = thingsToString things }, Cmd.none )
+                    
                 Err error ->
                     ( { model | response = (Error.handle error) }, Cmd.none )
             
-        RemoveChannel ->
+        RemoveThing ->
             ( model
             , remove
-                urls.channels
-                model.channel                     
+                urls.things
+                model.name                     
                 model.token
             )            
+
 
 
 view : Model -> Html Msg
@@ -101,54 +111,65 @@ view model =
         [ Grid.col []
           [ Form.form []
             [ Form.group []
-              [ Form.label [ for "mychan" ] [ text "Name (Provision) or id (Remove)" ]
-              , Input.email [ Input.id "mychan", Input.onInput SubmitChannel ]
+              [ Form.label [ for "mytype" ] [ text "Type" ]
+              , Input.text [ Input.id "mytype", Input.onInput SubmitType ]
               ]
+            , Form.group []
+                [ Form.label [ for "myname" ] [ text "Name (Provision) or id (Remove)" ]
+                , Input.text [ Input.id "myname", Input.onInput SubmitName ]
+                ]
             , Form.group []
                 [ Form.label [ for "mytoken" ] [ text "Token" ]
                 , Input.text [ Input.id "mytoken", Input.onInput SubmitToken ]
-                ]
-            , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick ProvisionChannel ] [ text "Provision" ]
-            , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RetrieveChannel ] [ text "Retrieve" ]
-            , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RemoveChannel ] [ text "Remove" ]
+                ]                                        
+            , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick ProvisionThing ] [ text "Provision" ]
+            , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RetrieveThing ] [ text "Retrieve" ]
+            , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RemoveThing ] [ text "Remove" ]
             ]
           , Html.hr [] []
-          , text ("response: " ++ model.response)
-          ]
+          , text ("response: " ++ model.response) ]
         ]
 
-
-type alias Channel =
-    { name : String
+        
+type alias Thing =
+    { type_ : String
+    , name : String
     , id : String
+    , key : String
     }
-
-
-channelDecoder : D.Decoder Channel
-channelDecoder =
-    D.map2 Channel
+            
+            
+thingDecoder : D.Decoder Thing
+thingDecoder =
+    D.map4 Thing
+        (D.field "type" D.string)        
         (D.field "name" D.string)
         (D.field "id" D.string)
-    
-
-channelListDecoder : D.Decoder (List Channel)
-channelListDecoder =
-    (D.field "channels" (D.list channelDecoder))
+        (D.field "key" D.string)
 
 
-provision : String -> String -> String -> Cmd Msg
-provision url token name =
+thingListDecoder : D.Decoder (List Thing)
+thingListDecoder =
+    (D.field "things" (D.list thingDecoder))
+        
+
+provision : String -> String -> String -> String -> Cmd Msg            
+provision url token type_ name =
     Http.request
         { method = "POST"
         , headers = [ Http.header "Authorization" token ]
         , url = url
         , body =
-            E.object [ ( "name", E.string name ) ]
+            E.object
+                [ ("type", E.string type_)
+                , ("name", E.string name)
+                ]
+
         |> Http.jsonBody
-        , expect = expectProvision ProvisionedChannel
+        , expect = expectProvision ProvisionedThing
         , timeout = Nothing
         , tracker = Nothing
-        }
+    }
 
 
 expectProvision : (Result Http.Error Int -> Msg) -> Http.Expect Msg
@@ -169,7 +190,7 @@ expectProvision toMsg =
                     Err (Http.BadStatus metadata.statusCode)
 
                 Http.GoodStatus_ metadata _ ->
-                    Ok metadata.statusCode
+                    Ok metadata.statusCode    
 
 
 retrieve : String -> String -> Cmd Msg
@@ -179,13 +200,13 @@ retrieve url token =
         , headers = [ Http.header "Authorization" token ]
         , url = url
         , body = Http.emptyBody
-        , expect = expectRetrieve RetrievedChannel
+        , expect = expectRetrieve RetrievedThing
         , timeout = Nothing
         , tracker = Nothing
         }                    
 
 
-expectRetrieve : (Result Http.Error (List Channel) -> Msg) -> Http.Expect Msg
+expectRetrieve : (Result Http.Error (List Thing) -> Msg) -> Http.Expect Msg
 expectRetrieve toMsg =
   Http.expectStringResponse toMsg <|
     \response ->
@@ -203,12 +224,12 @@ expectRetrieve toMsg =
           Err (Http.BadStatus metadata.statusCode)
 
         Http.GoodStatus_ metadata body ->
-          case D.decodeString channelListDecoder body of
+          case D.decodeString thingListDecoder body of
             Ok value ->
               Ok value
 
             Err err ->
-              Err (Http.BadBody "Account has no channels")
+              Err (Http.BadBody "Account has no things")
 
 
 remove : String -> String -> String -> Cmd Msg
@@ -218,19 +239,19 @@ remove url id token =
         , headers = [ Http.header "Authorization" token ]
         , url = url ++ "/" ++ id
         , body = Http.emptyBody
-        , expect = expectProvision ProvisionedChannel
+        , expect = expectProvision ProvisionedThing
         , timeout = Nothing
         , tracker = Nothing
         }
 
 
+
 -- HELPERS
 
-                
-channelsToString : List Channel -> String
-channelsToString channels =
+
+thingsToString : List Thing -> String
+thingsToString things =
     List.map
-        (\channel -> channel.name ++ " " ++ channel.id ++ "; ")
-        channels
+        (\thing -> thing.id ++ " " ++ thing.type_ ++ " " ++ thing.name ++ " " ++ thing.key ++ "; ")
+        things
         |> String.concat
-        

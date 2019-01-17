@@ -16,7 +16,6 @@ import Bootstrap.Grid.Row as Row
 import Bootstrap.Utilities.Spacing as Spacing
 import Browser
 import Browser.Navigation as Nav
-import Channel
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Http
@@ -24,8 +23,13 @@ import Json.Decode exposing (Decoder, field, string)
 import Json.Encode as Encode
 import Url
 import Url.Parser as UrlParser exposing ((</>))
-import User
 
+
+import Error
+import Version
+import User
+import Thing
+import Channel
 
 
 -- MAIN
@@ -43,57 +47,51 @@ main =
         }
 
 
-
 -- MODEL
 
 
 type alias Model =
     { key : Nav.Key
-    , route : Maybe DocsRoute
-    , response : String
-    , email : String
-    , password : String
-    , channel : String
-    , token : String
+    , route : Maybe Route
+    , version : Version.Model
+    , user : User.Model
+    , channel : Channel.Model
+    , thing : Thing.Model
     }
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
-    ( Model key (UrlParser.parse docsParser url) "" "" "" "" "", Cmd.none )
+    ( Model key (UrlParser.parse parser url)
+          Version.initial
+          User.initial
+          Channel.initial
+          Thing.initial
+    , Cmd.none )
 
+
+-- URL PARSER
+
+
+type alias Route =
+    ( String, Maybe String )
+
+
+parser : UrlParser.Parser (Route -> a) a
+parser =
+    UrlParser.map Tuple.pair (UrlParser.string </> UrlParser.fragment identity)
 
 
 -- UPDATE
 
 
-type alias DocsRoute =
-    ( String, Maybe String )
-
-
-docsParser : UrlParser.Parser (DocsRoute -> a) a
-docsParser =
-    UrlParser.map Tuple.pair (UrlParser.string </> UrlParser.fragment identity)
-
-
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
-    | GetVersion
-    | GotVersion (Result Http.Error String)
-    | SubmitEmail String
-    | SubmitPassword String
-    | GetUser
-    | GotUser (Result Http.Error Int)
-    | GetToken
-    | GotToken (Result Http.Error String)
-    | SubmitChannel String
-    | SubmitToken String
-    | ProvisionChannel
-    | ProvisionedChannel (Result Http.Error Int)
-    | RetrieveChannel
-    | RetrievedChannel (Result Http.Error (List Channel.Channel))
-    | RemoveChannel
+    | VersionMsg Version.Msg
+    | UserMsg User.Msg
+    | ChannelMsg Channel.Msg
+    | ThingMsg Thing.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -108,115 +106,39 @@ update msg model =
                     ( Debug.log "model EXTERNAL click:" model, Cmd.none )
 
         UrlChanged url ->
-            ( { model | route = UrlParser.parse docsParser url }
+            ( { model | route = UrlParser.parse parser url }
             , Cmd.none
             )
 
-        GetVersion ->
-            ( model
-            , Http.get
-                { url = "http://localhost/version"
-                , expect = Http.expectJson GotVersion (field "version" string)
-                }
-            )
+        VersionMsg subMsg ->
+           let
+                ( updatedVersion, versionCmd ) =
+                    Version.update subMsg model.version
+            in
+                ( { model | version = updatedVersion }, Cmd.map VersionMsg versionCmd )
 
-        GotVersion result ->
-            case result of
-                Ok text ->
-                    ( Debug.log "model GOT version OK: " { model | response = "Version " ++ text }, Cmd.none )
+        UserMsg subMsg ->
+           let
+                ( updatedUser, userCmd ) =
+                    User.update subMsg model.user
+            in
+                ( { model | user = updatedUser }, Cmd.map UserMsg userCmd )
 
-                Err _ ->
-                    ( Debug.log "model GOT version ERR: " model, Cmd.none )
+        ChannelMsg subMsg ->
+           let
+                ( updatedChannel, channelCmd ) =
+                    Channel.update subMsg model.channel
+            in
+                ( { model | channel = updatedChannel }, Cmd.map ChannelMsg channelCmd )
 
-        SubmitEmail email ->
-            ( { model | email = email }, Cmd.none )
+        ThingMsg subMsg ->
+           let
+                ( updatedThing, thingCmd ) =
+                    Thing.update subMsg model.thing
+            in
+                ( { model | thing = updatedThing }, Cmd.map ThingMsg thingCmd )
 
-        SubmitPassword password ->
-            ( { model | password = password }, Cmd.none )
-
-        GetUser ->
-            ( model
-            , User.request
-                model.email
-                model.password
-                "http://localhost/users"
-                (User.expectUser GotUser)
-            )
-
-        GotUser result ->
-            case result of
-                Ok statusCode ->
-                    ( { model | response = "Ok " ++ String.fromInt statusCode }, Cmd.none )
-
-                Err error ->
-                    handleError error model
-
-        GetToken ->
-            ( model
-            , User.request
-                model.email
-                model.password
-                "http://localhost/tokens"
-                (User.expectToken GotToken)
-            )
-
-        GotToken result ->
-            case result of
-                Ok token ->
-                    ( { model | response = "Ok " ++ token }, Cmd.none )
-
-                Err error ->
-                    handleError error model
-
-        SubmitChannel channel ->
-            ( { model | channel = channel }, Cmd.none )
-
-        SubmitToken token ->
-            ( { model | token = token }, Cmd.none )
-
-        ProvisionChannel ->
-            ( model
-            , Channel.requestProvision
-                "http://localhost/channels"
-                model.token
-                model.channel
-                (Channel.expectProvision ProvisionedChannel)
-            )
-
-        ProvisionedChannel result ->
-            case result of
-                Ok statusCode ->
-                    ( { model | response = "Ok " ++ String.fromInt statusCode }, Cmd.none )
-
-                Err error ->
-                    handleError error model
-
-        RetrieveChannel ->
-            ( model
-            , Channel.requestRetrieve
-                "http://localhost/channels"
-                model.token
-                (Channel.expectRetrieve RetrievedChannel)
-            )
-
-        RetrievedChannel result ->
-            case result of
-                Ok channels ->
-                    ( { model | response = channelsToString channels }, Cmd.none )
-
-                Err error ->
-                    handleError error model
-            
-        RemoveChannel ->
-            ( model
-            , Channel.requestRemove
-                "http://localhost/channels"
-                model.channel                     
-                model.token
-                (Channel.expectProvision ProvisionedChannel)                     
-            )            
-
-
+                
 -- SUBSCRIPTIONS
 
 
@@ -225,81 +147,35 @@ subscriptions _ =
     Sub.none
 
 
-
 -- VIEW
 
 
 view : Model -> Browser.Document Msg
 view model =
-    { title = "URL Interceptor"
+    { title = "Gateflux"
     , body =
         let
-            response =
-                Grid.row []
-                    [ Grid.col []
-                        [ text ("response: " ++ model.response) ]
-                    ]
-
             content =
                 case model.route of
                     Just route ->
                         case Tuple.first route of
                             "version" ->
-                                [ Button.linkButton
-                                    [ Button.primary, Button.onClick GetVersion ]
-                                    [ text "Version" ]
-                                , hr [] []
-                                , response
-                                ]
+                                Html.map VersionMsg (Version.view model.version)
 
                             "account" ->
-                                [ Form.form []
-                                    [ Form.group []
-                                        [ Form.label [ for "myemail" ] [ text "Email address" ]
-                                        , Input.email [ Input.id "myemail", Input.onInput SubmitEmail ]
-
-                                        -- , Form.help [] [ text "Register user" ]
-                                        ]
-                                    , Form.group []
-                                        [ Form.label [ for "mypwd" ] [ text "Password" ]
-                                        , Input.password [ Input.id "mypwd", Input.onInput SubmitPassword ]
-
-                                        -- , Form.help [] [ text model.password ]
-                                        ]
-                                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick GetUser ] [ text "Register" ]
-                                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick GetToken ] [ text "Token" ]
-                                    ]
-                                , hr [] []
-                                , response
-                                ]
-
+                                Html.map UserMsg (User.view model.user)
+                                    
                             "channel" ->
-                                [ Form.form []
-                                    [ Form.group []
-                                        [ Form.label [ for "mychan" ] [ text "Channel" ]
-                                        , Input.email [ Input.id "mychan", Input.onInput SubmitChannel ]
+                                Html.map ChannelMsg (Channel.view model.channel)
 
-                                        -- , Form.help [] [ text model.channel ]
-                                        ]
-                                    , Form.group []
-                                        [ Form.label [ for "mytoken" ] [ text "Token" ]
-                                        , Input.text [ Input.id "mytoken", Input.onInput SubmitToken ]
-
-                                        -- , Form.help [] [ text model.token ]
-                                        ]
-                                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick ProvisionChannel ] [ text "Provision" ]
-                                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RetrieveChannel ] [ text "Retrieve" ]
-                                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RemoveChannel ] [ text "Remove" ]
-                                    ]
-                                , hr [] []
-                                , response
-                                ]
+                            "things" ->
+                                Html.map ThingMsg (Thing.view model.thing)
 
                             _ ->
-                                [ h3 [] [ text "Welcome to Gateflux" ] ]
+                                h3 [] [ text "Welcome to Gateflux" ]
 
                     Nothing ->
-                        [ h3 [] [ text "Welcome" ] ]
+                        h3 [] [ text "" ]
         in
         [ -- we use Bootstrap container defined at http://elm-bootstrap.info/grid
           Grid.container []
@@ -312,9 +188,7 @@ view model =
                       ButtonGroup.linkButtonGroup [ ButtonGroup.vertical ] menuButtons
                     ]
                 , Grid.col [ Col.xs10 ]
-                    [ div
-                        []
-                        content
+                    [ content
                     ]
                 ]
             ]
@@ -322,45 +196,10 @@ view model =
     }
 
 
-
--- Vertical button group defined at http://elm-bootstrap.info/buttongroup
-
-
 menuButtons : List (ButtonGroup.LinkButtonItem msg)
 menuButtons =
     [ ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/version" ] ] [ text "Version" ]
     , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/account" ] ] [ text "Account" ]
-    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/channel" ] ] [ text "Channel" ]
+    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/channel" ] ] [ text "Channels" ]
     , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/things" ] ] [ text "Things" ]
     ]
-
-
-
--- HELPERS
-
-
-handleError : Http.Error -> Model -> ( Model, Cmd Msg )
-handleError error model =
-    case error of
-        Http.BadUrl txt ->
-            ( { model | response = "Bad url " ++ txt }, Cmd.none )
-
-        Http.Timeout ->
-            ( { model | response = "Timeout" }, Cmd.none )
-
-        Http.NetworkError ->
-            ( { model | response = "Network error" }, Cmd.none )
-
-        Http.BadStatus num ->
-            ( { model | response = "Bad status " ++ String.fromInt num }, Cmd.none )
-
-        Http.BadBody err ->
-            ( { model | response = err }, Cmd.none )
-
-                
-channelsToString : List Channel.Channel -> String
-channelsToString channels =
-    List.map
-        (\channel -> channel.name ++ " " ++ channel.id ++ " || ")
-        channels
-        |> String.concat
