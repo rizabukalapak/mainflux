@@ -5,6 +5,7 @@ import Html exposing  (..)
 import Html.Attributes exposing (..)
 import Json.Encode as E
 import Json.Decode as D
+import Url.Builder as B
 
 import Bootstrap.Grid as Grid
 import Bootstrap.Button as Button
@@ -15,15 +16,23 @@ import Bootstrap.Utilities.Spacing as Spacing
 import Error
 
 
-urls =
-    {
-        channels = "http://localhost/channels"
+url =
+    { base = "http://localhost"        
+    ,path = [ "channels" ]
     }
-   
+
+
+path =
+    { offset = "0"
+    , limit = "10"
+    }
+
 
 type alias Model =
     { channel : String
     , token : String
+    , offset : String
+    , limit : String
     , response : String
     }
 
@@ -32,6 +41,8 @@ initial : Model
 initial =
     { channel = ""
     , token = ""
+    , offset = path.offset
+    , limit = path.limit
     , response = ""
     }
 
@@ -39,6 +50,8 @@ initial =
 type Msg
     = SubmitChannel String
     | SubmitToken String
+    | SubmitOffset String
+    | SubmitLimit String
     | ProvisionChannel
     | ProvisionedChannel (Result Http.Error Int)
     | RetrieveChannel
@@ -55,10 +68,16 @@ update msg model =
         SubmitToken token ->
             ( { model | token = token }, Cmd.none )
 
+        SubmitOffset offset ->
+            ( { model | offset = offset }, Cmd.none )
+
+        SubmitLimit limit ->
+            ( { model | limit = limit }, Cmd.none )
+
         ProvisionChannel ->
             ( model
             , provision
-                urls.channels
+                (B.crossOrigin url.base url.path [])
                 model.token
                 model.channel
             )
@@ -74,7 +93,7 @@ update msg model =
         RetrieveChannel ->
             ( model
             , retrieve
-                urls.channels
+                (B.crossOrigin url.base url.path (buildQueryParamList model))
                 model.token
             )
 
@@ -89,8 +108,7 @@ update msg model =
         RemoveChannel ->
             ( model
             , remove
-                urls.channels
-                model.channel                     
+                (B.crossOrigin url.base (List.append url.path [ model.channel ]) [])
                 model.token
             )            
 
@@ -101,13 +119,21 @@ view model =
         [ Grid.col []
           [ Form.form []
             [ Form.group []
-              [ Form.label [ for "mychan" ] [ text "Name (Provision) or id (Remove)" ]
-              , Input.email [ Input.id "mychan", Input.onInput SubmitChannel ]
+              [ Form.label [ for "chan" ] [ text "Name (Provision) or id (Remove)" ]
+              , Input.email [ Input.id "chan", Input.onInput SubmitChannel ]
               ]
             , Form.group []
-                [ Form.label [ for "mytoken" ] [ text "Token" ]
-                , Input.text [ Input.id "mytoken", Input.onInput SubmitToken ]
+                [ Form.label [ for "token" ] [ text "Token" ]
+                , Input.text [ Input.id "token", Input.onInput SubmitToken ]
                 ]
+            , Form.group []
+                [ Form.label [ for "offset" ] [ text "Offset" ]
+                , Input.text [ Input.id "offset", Input.onInput SubmitOffset ]
+                ]
+            , Form.group []
+                [ Form.label [ for "limit" ] [ text "Limit" ]
+                , Input.text [ Input.id "limit", Input.onInput SubmitLimit ]
+                ]                
             , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick ProvisionChannel ] [ text "Provision" ]
             , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RetrieveChannel ] [ text "Retrieve" ]
             , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RemoveChannel ] [ text "Remove" ]
@@ -137,11 +163,11 @@ channelListDecoder =
 
 
 provision : String -> String -> String -> Cmd Msg
-provision url token name =
+provision u token name =
     Http.request
         { method = "POST"
         , headers = [ Http.header "Authorization" token ]
-        , url = url
+        , url = u
         , body =
             E.object [ ( "name", E.string name ) ]
         |> Http.jsonBody
@@ -156,8 +182,8 @@ expectProvision toMsg =
     Http.expectStringResponse toMsg <|
         \response ->
             case response of
-                Http.BadUrl_ url ->
-                    Err (Http.BadUrl url)
+                Http.BadUrl_ u ->
+                    Err (Http.BadUrl u)
 
                 Http.Timeout_ ->
                     Err Http.Timeout
@@ -173,11 +199,11 @@ expectProvision toMsg =
 
 
 retrieve : String -> String -> Cmd Msg
-retrieve url token =
+retrieve u token =
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" token ]
-        , url = url
+        , url = u
         , body = Http.emptyBody
         , expect = expectRetrieve RetrievedChannel
         , timeout = Nothing
@@ -190,8 +216,8 @@ expectRetrieve toMsg =
   Http.expectStringResponse toMsg <|
     \response ->
       case response of
-        Http.BadUrl_ url ->
-          Err (Http.BadUrl url)
+        Http.BadUrl_ u ->
+          Err (Http.BadUrl u)
 
         Http.Timeout_ ->
           Err Http.Timeout
@@ -211,12 +237,12 @@ expectRetrieve toMsg =
               Err (Http.BadBody "Account has no channels")
 
 
-remove : String -> String -> String -> Cmd Msg
-remove url id token =
+remove : String -> String -> Cmd Msg
+remove u token =
     Http.request
         { method = "DELETE"
         , headers = [ Http.header "Authorization" token ]
-        , url = url ++ "/" ++ id
+        , url = u
         , body = Http.emptyBody
         , expect = expectProvision ProvisionedChannel
         , timeout = Nothing
@@ -233,4 +259,19 @@ channelsToString channels =
         (\channel -> channel.name ++ " " ++ channel.id ++ "; ")
         channels
         |> String.concat
-        
+
+
+buildQueryParamList : Model -> List B.QueryParameter
+buildQueryParamList model =
+    List.map 
+        (\tpl ->
+             case (String.toInt (Tuple.second tpl)) of
+                 Just n ->
+                     B.int (Tuple.first tpl) n
+                            
+                 Nothing ->
+                     if (Tuple.first tpl) == "offset" then
+                         B.string (Tuple.first tpl) path.offset
+                     else
+                         B.string (Tuple.first tpl) path.limit)
+        [("offset", model.offset), ("limit", model.limit)]
