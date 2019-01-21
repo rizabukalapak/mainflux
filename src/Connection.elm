@@ -1,4 +1,4 @@
-module Message exposing (Model, Msg(..), expectMessage, initial, update, view)
+module Connection exposing (Model, Msg(..), expectResponse, initial, update, view)
 
 import Bootstrap.Button as Button
 import Bootstrap.Form as Form
@@ -18,7 +18,7 @@ url =
 
 
 type alias Model =
-    { message : String
+    { thing : String
     , token : String
     , channel : String
     , response : String
@@ -27,7 +27,7 @@ type alias Model =
 
 initial : Model
 initial =
-    { message = ""
+    { thing = ""
     , token = ""
     , channel = ""
     , response = ""
@@ -35,39 +35,53 @@ initial =
 
 
 type Msg
-    = SubmitMessage String
+    = SubmitThing String
     | SubmitToken String
     | SubmitChannel String
-    | SendMessage
-    | SentMessage (Result Http.Error Int)
+    | Connect
+    | Disconnect
+    | GotResponse (Result Http.Error Int)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        SubmitMessage message ->
-            ( { model | message = message }, Cmd.none )
-
         SubmitChannel channel ->
             ( { model | channel = channel }, Cmd.none )
+
+        SubmitThing thing ->
+            ( { model | thing = thing }, Cmd.none )
 
         SubmitToken token ->
             ( { model | token = token }, Cmd.none )
 
-        SendMessage ->
+        Connect ->
             ( model
             , Http.request
-                { method = "POST"
+                { method = "PUT"
                 , headers = [ Http.header "Authorization" model.token ]
-                , url = B.crossOrigin url.base [ "http", "channels", model.channel, "messages" ] []
-                , body = Http.stringBody "application/json" model.message
-                , expect = expectMessage SentMessage
+                , url = B.crossOrigin url.base [ "channels", model.channel, "things", model.thing ] []
+                , body = Http.emptyBody
+                , expect = expectResponse GotResponse
                 , timeout = Nothing
                 , tracker = Nothing
                 }
             )
 
-        SentMessage result ->
+        Disconnect ->
+            ( model
+            , Http.request
+                { method = "DELETE"
+                , headers = [ Http.header "Authorization" model.token ]
+                , url = B.crossOrigin url.base [ "channels", model.channel, "things", model.thing ] []
+                , body = Http.emptyBody
+                , expect = expectResponse GotResponse
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+            )
+
+        GotResponse result ->
             case result of
                 Ok statusCode ->
                     ( { model | response = "Ok " ++ String.fromInt statusCode }, Cmd.none )
@@ -82,18 +96,19 @@ view model =
         [ Grid.col []
             [ Form.form []
                 [ Form.group []
-                    [ Form.label [ for "mychan" ] [ text "Channel" ]
-                    , Input.email [ Input.id "mychan", Input.onInput SubmitChannel ]
+                    [ Form.label [ for "chan" ] [ text "Channel" ]
+                    , Input.email [ Input.id "chan", Input.onInput SubmitChannel ]
                     ]
                 , Form.group []
-                    [ Form.label [ for "mytoken" ] [ text "Token" ]
-                    , Input.text [ Input.id "mytoken", Input.onInput SubmitToken ]
+                    [ Form.label [ for "token" ] [ text "Token" ]
+                    , Input.text [ Input.id "token", Input.onInput SubmitToken ]
                     ]
                 , Form.group []
-                    [ Form.label [ for "mymessage" ] [ text "Message" ]
-                    , Input.text [ Input.id "mymessage", Input.onInput SubmitMessage ]
+                    [ Form.label [ for "thing" ] [ text "Thing" ]
+                    , Input.text [ Input.id "thing", Input.onInput SubmitThing ]
                     ]
-                , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick SendMessage ] [ text "Send" ]
+                , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick Connect ] [ text "Connect" ]
+                , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick Disconnect ] [ text "Disonnect" ]
                 ]
             , Html.hr [] []
             , text ("response: " ++ model.response)
@@ -101,8 +116,8 @@ view model =
         ]
 
 
-expectMessage : (Result Http.Error Int -> msg) -> Http.Expect msg
-expectMessage toMsg =
+expectResponse : (Result Http.Error Int -> Msg) -> Http.Expect Msg
+expectResponse toMsg =
     Http.expectStringResponse toMsg <|
         \response ->
             case response of
