@@ -1,4 +1,4 @@
-module Main exposing (Model, Msg(..), init, main, menuButtons, subscriptions, update, view)
+module Main exposing (Model, Msg(..), init, main, subscriptions, update, view)
 
 import Bootstrap.Button as Button
 import Bootstrap.ButtonGroup as ButtonGroup
@@ -139,21 +139,21 @@ update msg model =
         ChannelMsg subMsg ->
             let
                 ( updatedChannel, channelCmd ) =
-                    Channel.update subMsg model.channel
+                    Channel.update subMsg model.channel model.user.token
             in
             ( { model | channel = updatedChannel }, Cmd.map ChannelMsg channelCmd )
 
         ThingMsg subMsg ->
             let
                 ( updatedThing, thingCmd ) =
-                    Thing.update subMsg model.thing
+                    Thing.update subMsg model.thing model.user.token
             in
             ( { model | thing = updatedThing }, Cmd.map ThingMsg thingCmd )
 
         ConnectionMsg subMsg ->
             let
                 ( updatedConnection, connectionCmd ) =
-                    Connection.update subMsg model.connection
+                    Connection.update subMsg model.connection model.user.token
             in
             ( { model | connection = updatedConnection }, Cmd.map ConnectionMsg connectionCmd )
 
@@ -183,33 +183,58 @@ view model =
     { title = "Gateflux"
     , body =
         let
+            loggedIn : Bool
+            loggedIn =
+                if String.length model.user.token > 0 then
+                    True
+
+                else
+                    False
+
+            menu =
+                if loggedIn then
+                    [ ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/account" ] ] [ text "Account" ]
+                    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/channel" ] ] [ text "Channels" ]
+                    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/things" ] ] [ text "Things" ]
+                    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/connection" ] ] [ text "Connection" ]
+                    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/messages" ] ] [ text "Messages" ]
+                    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/version" ] ] [ text "Version" ]
+                    ]
+
+                else
+                    []
+
             content =
-                case model.route of
-                    Just route ->
-                        case Tuple.first route of
-                            "version" ->
-                                Html.map VersionMsg (Version.view model.version)
+                if loggedIn then
+                    case model.route of
+                        Just route ->
+                            case Tuple.first route of
+                                "version" ->
+                                    Html.map VersionMsg (Version.view model.version)
 
-                            "account" ->
-                                Html.map UserMsg (User.view model.user)
+                                "account" ->
+                                    Html.map UserMsg (User.view model.user)
 
-                            "channel" ->
-                                Html.map ChannelMsg (Channel.view model.channel)
+                                "channel" ->
+                                    Html.map ChannelMsg (Channel.view model.channel)
 
-                            "things" ->
-                                Html.map ThingMsg (Thing.view model.thing)
+                                "things" ->
+                                    Html.map ThingMsg (Thing.view model.thing)
 
-                            "connection" ->
-                                Html.map ConnectionMsg (Connection.view model.connection)
+                                "connection" ->
+                                    Html.map ConnectionMsg (Connection.view model.connection)
 
-                            "messages" ->
-                                Html.map MessageMsg (Message.view model.message)
+                                "messages" ->
+                                    Html.map MessageMsg (Message.view model.message)
 
-                            _ ->
-                                h3 [] [ text "Welcome to Gateflux" ]
+                                _ ->
+                                    h3 [] [ text "Welcome to Gateflux" ]
 
-                    Nothing ->
-                        h3 [] [ text "" ]
+                        Nothing ->
+                            Html.map UserMsg (User.view model.user)
+
+                else
+                    Html.map UserMsg (User.view model.user)
         in
         [ -- we use Bootstrap container defined at http://elm-bootstrap.info/grid
           Grid.container []
@@ -219,7 +244,7 @@ view model =
             , Grid.row []
                 [ Grid.col []
                     [ -- In this column we put the button group defined below
-                      ButtonGroup.linkButtonGroup [ ButtonGroup.vertical ] menuButtons
+                      ButtonGroup.linkButtonGroup [ ButtonGroup.vertical ] menu
                     ]
                 , Grid.col [ Col.xs10 ]
                     [ content
@@ -228,14 +253,3 @@ view model =
             ]
         ]
     }
-
-
-menuButtons : List (ButtonGroup.LinkButtonItem msg)
-menuButtons =
-    [ ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/version" ] ] [ text "Version" ]
-    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/account" ] ] [ text "Account" ]
-    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/channel" ] ] [ text "Channels" ]
-    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/things" ] ] [ text "Things" ]
-    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/connection" ] ] [ text "Connection" ]
-    , ButtonGroup.linkButton [ Button.secondary, Button.attrs [ href "/messages" ] ] [ text "Messages" ]
-    ]
