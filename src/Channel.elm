@@ -3,9 +3,10 @@ module Channel exposing (Model, Msg(..), initial, update, view)
 import Bootstrap.Button as Button
 import Bootstrap.Form as Form
 import Bootstrap.Form.Input as Input
+import Bootstrap.Form.InputGroup as InputGroup
 import Bootstrap.Grid as Grid
+import Bootstrap.Table as Table
 import Bootstrap.Utilities.Spacing as Spacing
-import Debug exposing (log)
 import Error
 import Helpers
 import Html exposing (..)
@@ -22,119 +23,156 @@ url =
     }
 
 
-path =
+query =
     { offset = "0"
     , limit = "10"
     }
 
 
 type alias Model =
-    { channel : String
-    , token : String
+    { name : String
     , offset : String
     , limit : String
     , response : String
+    , channels : List Channel
     }
 
 
 initial : Model
 initial =
-    { channel = ""
-    , token = ""
-    , offset = path.offset
-    , limit = path.limit
+    { name = ""
+    , offset = query.offset
+    , limit = query.limit
     , response = ""
+    , channels = []
     }
 
 
 type Msg
-    = SubmitChannel String
+    = SubmitName String
     | SubmitOffset String
     | SubmitLimit String
     | ProvisionChannel
     | ProvisionedChannel (Result Http.Error Int)
-    | RetrieveChannel
-    | RetrievedChannel (Result Http.Error (List Channel))
-    | RemoveChannel
+    | RetrieveChannels
+    | RetrievedChannels (Result Http.Error (List Channel))
+    | RemoveChannel String
+    | RemovedChannel (Result Http.Error Int)
 
 
 update : Msg -> Model -> String -> ( Model, Cmd Msg )
 update msg model token =
     case msg of
-        SubmitChannel channel ->
-            ( { model | channel = channel }, Cmd.none )
+        SubmitName name ->
+            ( { model | name = name }, Cmd.none )
 
         SubmitOffset offset ->
-            ( { model | offset = offset }, Cmd.none )
+            updateChannelList { model | offset = offset } token
 
         SubmitLimit limit ->
-            ( { model | limit = limit }, Cmd.none )
+            updateChannelList { model | limit = limit } token
 
         ProvisionChannel ->
             ( model
             , provision
                 (B.crossOrigin url.base url.path [])
                 token
-                model.channel
+                model.name
             )
 
         ProvisionedChannel result ->
             case result of
                 Ok statusCode ->
-                    ( { model | response = "Ok " ++ String.fromInt statusCode }, Cmd.none )
+                    updateChannelList { model | response = String.fromInt statusCode } token
 
                 Err error ->
                     ( { model | response = Error.handle error }, Cmd.none )
 
-        RetrieveChannel ->
+        RetrieveChannels ->
             ( model
             , retrieve
-                (B.crossOrigin url.base url.path (buildQueryParamList model))
+                (B.crossOrigin url.base
+                    url.path
+                    (Helpers.buildQueryParamList model.offset model.limit query)
+                )
                 token
             )
 
-        RetrievedChannel result ->
+        RetrievedChannels result ->
             case result of
                 Ok channels ->
-                    ( { model | response = channelsToString channels }, Cmd.none )
+                    ( { model | channels = channels }, Cmd.none )
 
                 Err error ->
                     ( { model | response = Error.handle error }, Cmd.none )
 
-        RemoveChannel ->
+        RemoveChannel id ->
             ( model
             , remove
-                (B.crossOrigin url.base (List.append url.path [ model.channel ]) [])
+                (B.crossOrigin url.base (List.append url.path [ id ]) [])
                 token
             )
+
+        RemovedChannel result ->
+            case result of
+                Ok statusCode ->
+                    updateChannelList { model | response = String.fromInt statusCode } token
+
+                Err error ->
+                    ( { model | response = Error.handle error }, Cmd.none )
 
 
 view : Model -> Html Msg
 view model =
     Grid.container []
         [ Grid.row []
+            [ Grid.col [] [ Input.text [ Input.placeholder "offset", Input.id "offset", Input.onInput SubmitOffset ] ]
+            , Grid.col [] [ Input.text [ Input.placeholder "limit", Input.id "limit", Input.onInput SubmitLimit ] ]
+            ]
+        , Grid.row []
             [ Grid.col []
-                [ Form.form []
-                    [ Form.group []
-                        [ Form.label [ for "chan" ] [ text "Name (Provision) or id (Remove)" ]
-                        , Input.email [ Input.id "chan", Input.onInput SubmitChannel ]
+                [ Table.simpleTable
+                    ( Table.simpleThead
+                        [ Table.th [] [ text "Name" ]
+                        , Table.th [] [ text "Id" ]
                         ]
-                    , Form.group []
-                        [ Form.label [ for "offset" ] [ text "Offset" ]
-                        , Input.text [ Input.id "offset", Input.onInput SubmitOffset ]
-                        ]
-                    , Form.group []
-                        [ Form.label [ for "limit" ] [ text "Limit" ]
-                        , Input.text [ Input.id "limit", Input.onInput SubmitLimit ]
-                        ]
-                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick ProvisionChannel ] [ text "Provision" ]
-                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RetrieveChannel ] [ text "Retrieve" ]
-                    , Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick RemoveChannel ] [ text "Remove" ]
-                    ]
+                    , Table.tbody []
+                        (List.append
+                            [ Table.tr []
+                                [ Table.td [] [ Input.text [ Input.id "name", Input.onInput SubmitName ] ]
+                                , Table.td [] []
+                                , Table.td [] [ Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick ProvisionChannel ] [ text "+" ] ]
+                                ]
+                            ]
+                            (genTableRows model.channels)
+                        )
+                    )
                 ]
             ]
-        , Helpers.response model.response
         ]
+
+
+genTableRows : List Channel -> List (Table.Row Msg)
+genTableRows channels =
+    let
+        parseName : Maybe String -> String
+        parseName channelName =
+            case channelName of
+                Just name ->
+                    name
+
+                Nothing ->
+                    ""
+    in
+    List.map
+        (\channel ->
+            Table.tr []
+                [ Table.td [] [ text (parseName channel.name) ]
+                , Table.td [] [ text channel.id ]
+                , Table.td [] [ Button.button [ Button.primary, Button.attrs [ Spacing.ml1 ], Button.onClick (RemoveChannel channel.id) ] [ text "-" ] ]
+                ]
+        )
+        channels
 
 
 type alias Channel =
@@ -164,14 +202,14 @@ provision u token name =
         , body =
             E.object [ ( "name", E.string name ) ]
                 |> Http.jsonBody
-        , expect = expectProvision ProvisionedChannel
+        , expect = expectStatus ProvisionedChannel
         , timeout = Nothing
         , tracker = Nothing
         }
 
 
-expectProvision : (Result Http.Error Int -> Msg) -> Http.Expect Msg
-expectProvision toMsg =
+expectStatus : (Result Http.Error Int -> Msg) -> Http.Expect Msg
+expectStatus toMsg =
     Http.expectStringResponse toMsg <|
         \response ->
             case response of
@@ -198,7 +236,7 @@ retrieve u token =
         , headers = [ Http.header "Authorization" token ]
         , url = u
         , body = Http.emptyBody
-        , expect = expectRetrieve RetrievedChannel
+        , expect = expectRetrieve RetrievedChannels
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -237,7 +275,7 @@ remove u token =
         , headers = [ Http.header "Authorization" token ]
         , url = u
         , body = Http.emptyBody
-        , expect = expectProvision ProvisionedChannel
+        , expect = expectStatus RemovedChannel
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -247,34 +285,13 @@ remove u token =
 -- HELPERS
 
 
-channelsToString : List Channel -> String
-channelsToString channels =
-    List.map
-        (\channel ->
-            case channel.name of
-                Just name ->
-                    name ++ " " ++ channel.id ++ "; "
-
-                Nothing ->
-                    channel.id ++ "; "
+updateChannelList : Model -> String -> ( Model, Cmd Msg )
+updateChannelList model token =
+    ( model
+    , retrieve
+        (B.crossOrigin url.base
+            url.path
+            (Helpers.buildQueryParamList model.offset model.limit query)
         )
-        channels
-        |> String.concat
-
-
-buildQueryParamList : Model -> List B.QueryParameter
-buildQueryParamList model =
-    List.map
-        (\tpl ->
-            case String.toInt (Tuple.second tpl) of
-                Just n ->
-                    B.int (Tuple.first tpl) n
-
-                Nothing ->
-                    if Tuple.first tpl == "offset" then
-                        B.string (Tuple.first tpl) path.offset
-
-                    else
-                        B.string (Tuple.first tpl) path.limit
-        )
-        [ ( "offset", model.offset ), ( "limit", model.limit ) ]
+        token
+    )
