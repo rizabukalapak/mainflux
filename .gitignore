@@ -1,4 +1,8 @@
 build
-
 site/
+
+ui/elm-stuff
+ui/src/.dir-locals.el
+
+.vscode
 
